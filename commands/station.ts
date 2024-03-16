@@ -1,7 +1,15 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction } from 'discord.js';
+import {
+  SlashCommandBuilder,
+  ChatInputCommandInteraction,
+  ButtonBuilder,
+  ButtonStyle,
+  ActionRowBuilder,
+} from 'discord.js';
 import { calculateDistance } from '../utils/coordinate';
 import { vehicleSpecs } from '../data';
-import { searchAllStations, searchOneStation } from '../utils/api';
+import { bookStation, searchAllStations, searchOneStation } from '../utils/api';
+
+const userIntervals = new Map<string, NodeJS.Timeout>();
 
 const handleMultipleStations = async (
   startDate: Date,
@@ -15,13 +23,12 @@ const handleMultipleStations = async (
   const latitude = 45.512651;
   const longitude = -73.551921;
 
-  stations.forEach((station, index) => {
-    message += `\nVehicle ${index + 1}:\n`;
-    message += `ID: ${station.recommendedVehicleId}\n`;
+  stations.forEach((station) => {
+    message += `\nVehicle: ${station.recommendedVehicleId}\n`;
     message += `Station: ${station.stationName}\n`;
     message += `Distance: ${calculateDistance({ latitude, longitude }, station.stationLocation)} kms\n`;
   });
-  return message;
+  return { message, vehicles: stations };
 };
 
 const handleOneStation = async (
@@ -40,11 +47,72 @@ const handleOneStation = async (
   let message = '';
 
   vehicles.forEach((vehicle) => {
-    message += `Vehicle ${vehicle.vehicleNb}:\n`;
+    message += `\nVehicle ${vehicle.vehicleId}:\n`;
     message += `Model: ${vehicle.make} ${vehicle.model}\n`;
     message += `Type: ${vehicleSpecs.vehicleTypes[vehicle.vehicleTypeId]}\n`;
   });
-  return message;
+  return { message, vehicles };
+};
+
+const requestAndSendMessage = async (
+  stationId: string | null,
+  startDate: Date,
+  endDate: Date,
+  vehicleType: string | null,
+  interaction: ChatInputCommandInteraction,
+) => {
+  const { message: body, vehicles } = stationId
+    ? await handleOneStation(stationId, startDate, endDate, vehicleType)
+    : await handleMultipleStations(startDate, endDate, vehicleType);
+
+  if (!vehicles.length) return;
+
+  const buttons = vehicles.slice(0, 5).map((vehicle) => {
+    const vehicleId =
+      'vehicleId' in vehicle ? vehicle.vehicleId : vehicle.recommendedVehicleId;
+
+    return new ButtonBuilder()
+      .setCustomId(vehicleId.toString())
+      .setLabel(`Book ${vehicleId}`)
+      .setStyle(ButtonStyle.Primary);
+  });
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(...buttons);
+
+  const userId = interaction.user.id;
+
+  if (!interaction.channel) return;
+
+  const message = await interaction.channel.send({
+    content: body.slice(0, 2000),
+    components: [row],
+  });
+
+  try {
+    const confirmation = await message.awaitMessageComponent({
+      filter: (i) => i.user.id === userId,
+      time: 60_000,
+    });
+    if (confirmation.customId) {
+      await bookStation(confirmation.customId, startDate, endDate);
+      await confirmation.update({
+        content: `Vehicle ${confirmation.customId} booked! 🚗`,
+        components: [],
+      });
+      if (userIntervals.has(userId)) {
+        clearInterval(userIntervals.get(userId));
+        userIntervals.delete(userId);
+        await interaction.channel.send('Search stopped !');
+      }
+    }
+  } catch (error) {
+    if (
+      error.message !==
+      'Collector received no interactions before ending with reason: time'
+    )
+      await interaction.channel.send(
+        `‼️ ${error.response?.data?.message || error.message}`,
+      );
+  }
 };
 
 export default {
@@ -79,20 +147,60 @@ export default {
         .addChoices({ name: 'Compact', value: '4' })
         .addChoices({ name: 'Minifourgonnette', value: '5' })
         .setRequired(false),
+    )
+    .addStringOption((option) =>
+      option
+        .setName('frequency')
+        .setDescription('The frequency of the search.')
+        .setRequired(false),
     ),
   async execute(interaction: ChatInputCommandInteraction) {
+    const userId = interaction.user.id;
+
+    if (userIntervals.has(userId)) {
+      clearInterval(userIntervals.get(userId));
+      userIntervals.delete(userId);
+      await interaction.reply('Search stopped !');
+      return;
+    }
+
     const startDate = new Date(
       interaction.options.getString('start_date') || new Date(),
     );
+    const offset = startDate.getTimezoneOffset();
+    startDate.setMinutes(startDate.getMinutes() + offset);
+
     const endDate = new Date(
       interaction.options.getString('end_date') || new Date(),
     );
+    endDate.setMinutes(endDate.getMinutes() + offset);
+
     const stationId = interaction.options.getString('station_id');
     const vehicleType = interaction.options.getString('vehicle_type');
-    const message = stationId
-      ? await handleOneStation(stationId, startDate, endDate, vehicleType)
-      : await handleMultipleStations(startDate, endDate, vehicleType);
+    const frequency = parseFloat(
+      interaction.options.getString('frequency') || '0',
+    );
 
-    await interaction.reply(message.slice(0, 2000));
+    requestAndSendMessage(
+      stationId,
+      startDate,
+      endDate,
+      vehicleType,
+      interaction,
+    );
+
+    if (frequency !== 0) {
+      const interval = setInterval(() => {
+        requestAndSendMessage(
+          stationId,
+          startDate,
+          endDate,
+          vehicleType,
+          interaction,
+        );
+      }, frequency * 60000);
+      userIntervals.set(userId, interval);
+      await interaction.reply(`Search started every ${frequency} minutes !`);
+    } else await interaction.reply('No frequency set, search done only once.');
   },
 };

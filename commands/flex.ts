@@ -147,7 +147,7 @@ export default {
             interaction,
             userCoordinates,
           ),
-        frequency * 60 * 1000,
+        frequency * 60000,
       );
       userIntervals.set(userId, interval);
       await interaction.reply(`Search started every ${frequency} minutes !`);
