@@ -38,7 +38,7 @@ export default class Bot {
     if (!token) throw new Error('No token provided');
     const rest = new REST().setToken(token);
     const commandFiles = readdirSync(join(__dirname, 'commands')).filter(
-      (file) => file.endsWith('.ts'),
+      (file) => !file.endsWith('.map'),
     );
 
     const commandsData = new Array<ApplicationCommandDataResolvable>();
