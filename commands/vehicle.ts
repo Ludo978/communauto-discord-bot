@@ -56,7 +56,7 @@ export default {
 
       await interaction.reply(message.slice(0, 2000));
     } catch (error) {
-      console.log(error.message);
+      console.error(error.message);
       await interaction.reply('Vehicle not found.');
     }
   },

@@ -89,7 +89,10 @@ export const searchOneStation = async (
   let url = `${URL}/Station/${stationId}/VehicleAvailability?StartDate=${startDate.toISOString()}&EndDate=${endDate.toISOString()}`;
   if (vehicleType) url += `&VehicleTypes=${vehicleType}`;
   const { data } = await axios.get<{ vehicles: StationVehicle[] }>(url);
-  return data.vehicles.filter((vehicle) => vehicle.satisfiesFilters);
+  return data.vehicles.filter(
+    (vehicle) =>
+      vehicle.satisfiesFilters && vehicle.vehicleTimeAvailabilities.length,
+  );
 };
 
 export const getFlexVehicleDetails = async (id: string) => {

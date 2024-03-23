@@ -167,13 +167,10 @@ export default {
     const startDate = new Date(
       interaction.options.getString('start_date') || new Date(),
     );
-    const offset = startDate.getTimezoneOffset();
-    startDate.setMinutes(startDate.getMinutes() + offset);
 
     const endDate = new Date(
       interaction.options.getString('end_date') || new Date(),
     );
-    endDate.setMinutes(endDate.getMinutes() + offset);
 
     const stationId = interaction.options.getString('station_id');
     const vehicleType = interaction.options.getString('vehicle_type');
